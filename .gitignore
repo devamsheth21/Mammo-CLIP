@@ -1,0 +1,52 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+ENV/
+.venv/
+
+# IDE/editor specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Python specific
+*.egg
+*.egg-info/
+dist/
+build/
+
+# # Logs
+# *.log
+
+# MyPy
+.mypy_cache/
+
+# Pytest
+.cache/
+
+# Coverage reports
+.coverage
+*.coveragerc
+
+# Sphinx documentation
+docs/_build/
+
+# Deployment
+*.db
+*.sqlite3
+
+# Mac OS X system files
+.DS_Store
+
+# Windows system files
+Thumbs.db

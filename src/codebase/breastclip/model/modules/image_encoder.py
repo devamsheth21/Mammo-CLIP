@@ -4,7 +4,9 @@ import torch.nn.functional as F
 from torch import nn
 from torch.nn import Parameter
 from torchvision.models.resnet import resnet50, resnet152, resnet101
-from transformers import AutoConfig, AutoModel, SwinModel, ViTModel
+# from transformers import AutoConfig, AutoModel, SwinModel, ViTModel
+from transformers import AutoConfig, AutoModel, ViTModel
+
 
 
 class HuggingfaceImageEncoder(nn.Module):
