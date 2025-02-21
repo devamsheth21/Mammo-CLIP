@@ -1,0 +1,43 @@
+# Experiment Set
+experiment: 1
+seed: 42
+test: false
+modelname: "multiviewmammoclip"
+train_file: "/mnt/PURENFS/SalkowskiPreprocessedBreast/code/ALBEF/data/uw_madison_pretrain_individual_lateralityv1.csv"
+image_root: "/mnt/PURENFS/SalkowskiPreprocessedBreast/processed_for_albef/"
+dataset_name: "ft_mv" # "ft"
+normalize:
+  mean: 0.3089279
+  std: 0.25053555408335154
+image_size:
+  width: 912
+  height: 1520
+
+# HyperParameters
+batch_size: 16
+epochs: 10
+learning_rate: 5e-5
+weight_decay: 0.0001
+max_grad_norm: 1.0
+
+# Accelerate
+grad_accum_steps: 2
+mixed_precision: "fp16"
+
+# Mammoclip text encoder
+max_words: 256
+
+# Selective sampling params
+selective_sampling: false
+rare_grp_ratio: 0.375
+batch_shuffle: false
+
+# Multiview model params (args)
+model_params:
+  hidden_dim: 512
+  num_layers: 3
+  num_heads: 8
+  num_images: 2
+  num_classes: 2
+  dropout: 0.25
+  clip_chk_pt_path: "/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/checkpoints/b5-model-best-epoch-7.tar"
