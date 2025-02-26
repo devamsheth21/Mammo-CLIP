@@ -1,7 +1,7 @@
 # Experiment Set
-experiment: 1
+experiment: 3
 seed: 42
-test: false
+test: False
 modelname: "multiviewmammoclip"
 train_file: "/mnt/PURENFS/SalkowskiPreprocessedBreast/code/ALBEF/data/uw_madison_pretrain_individual_lateralityv1.csv"
 image_root: "/mnt/PURENFS/SalkowskiPreprocessedBreast/processed_for_albef/"
@@ -15,8 +15,13 @@ image_size:
 
 # HyperParameters
 batch_size: 16
-epochs: 10
-learning_rate: 5e-5
+# epochs: 30
+lr_config:
+  name: "cosine" 
+  config:
+    total_epochs: 15
+    warmup_epochs: 3 
+learning_rate: 2e-5 #5e-5
 weight_decay: 0.0001
 max_grad_norm: 1.0
 

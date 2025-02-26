@@ -6,9 +6,9 @@
 #SBATCH --gres=gpu:4
 #SBATCH --qos=high
 #SBATCH --time=2:00:00
-
+#SBATCH --pty bash
 # Change the working directory
-cd /mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/Mammo-CLIP/src/codebase/finetune/scripts
+cd /mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/Mammo-CLIP/src/codebase/finetune/
 
 # Load the environment
 conda activate mammoalbef

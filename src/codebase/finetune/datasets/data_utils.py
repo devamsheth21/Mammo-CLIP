@@ -20,8 +20,9 @@ def load_dataloader(config,tokenizer, split="train"):
             transforms.Normalize((mean, mean, mean), (std, std, std)),
             lambda x: transforms.Resize(image_size)(x) if image_size else x
             ])
+        test = config.get('test',False)
     if dataname == 'ft_mv':
-        train_dataset = ft_uw_individual(config['train_file'],transform=ft_transform, tokenizer=tokenizer, max_words=config['max_words'], select = config['selective_sampling'],split=split)              
+        train_dataset = ft_uw_individual(config['train_file'],transform=ft_transform, tokenizer=tokenizer, max_words=config['max_words'], select = config['selective_sampling'],split=split,test=test)              
     elif dataname == 'ft':
         train_dataset = ft_train_dataset_new(config['train_file'], ft_transform, config['image_root'],
         max_words=config['max_words'], tokenizer = tokenizer, select= config['selective_sampling']) 

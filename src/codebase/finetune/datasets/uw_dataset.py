@@ -10,13 +10,15 @@ from PIL import Image
 from PIL import ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 Image.MAX_IMAGE_PIXELS = None
-from .selective_Sampling import SelectiveSampling2
+
 import sys
 sys.path.insert(0,'/mnt/PURENFS/SalkowskiPreprocessedBreast/code/ALBEF/')
 from dataset.utils import pre_caption, scale_0_1
-from dataset.selective_sampling import SelectiveSampling
+
 import pandas as pd
 from torchvision import transforms
+
+
 class ft_uw_individual(Dataset):
     def __init__(self, ann_file, transform, tokenizer, max_words=500, select = False , test=False, split = "train"):
         self.ann = pd.read_csv(ann_file)
@@ -24,14 +26,15 @@ class ft_uw_individual(Dataset):
         self.max_words = max_words
         self.all_groups =[]
         self.tokenizer = tokenizer
-        self.augment = None #img_R_s.transpose(method=Image.Transpose.FLIP_LEFT_RIGHT)
+
         if test:
             print("Testing for fraction of data")
-            self.ann = self.ann.sample(frac=0.001, random_state=42)
+            self.ann = self.ann.sample(frac=0.009, random_state=42)
         if split:
             self.ann = self.ann[self.ann["split"] == split]
-        if select :
-            self.selective_sampler = SelectiveSampling2(self.ann.to_dict('records'))
+        ## Need to implement Selective sampling or Use it from ALBEF-SS if needed.
+        # if select :
+        #     self.selective_sampler = SelectiveSampling2(self.ann.to_dict('records'))
         
     def __len__(self):
         return len(self.ann)
@@ -62,7 +65,7 @@ class ft_uw_individual(Dataset):
         return {
             "image": images,
             "text": caption,
-            "label": group_id,
+            "group": group_id,
             "view_seq":view_seq,
             "acc": accession,
         }
@@ -81,7 +84,7 @@ class ft_uw_individual(Dataset):
         return {
             "images": images,
             "acc": accessions,
-            "labels": labels,
+            "group": labels,
             "text_tokens": text_tokens,
             "view_seqs" : view_seqs
         }
@@ -90,7 +93,7 @@ class ft_uw_individual(Dataset):
         self.ann = self.selective_sampling.shuffle(bs=bs, rare_grp_ratio=rare_grp_ratio, batch_shuffle=batch_shuffle)
             
 
-class ft_train_dataset_new(Dataset):
+class ft_train_dataset_group(Dataset):
     def __init__(self, ann_file, transform, image_root,tokenizer, max_words=30, num_samples=20, select= None):
         self.ann = pd.read_json(ann_file)
         self.transform = transform

@@ -17,12 +17,18 @@ from loss import contrastive_loss
 from accelerate import Accelerator
 import random
 import numpy as np
+import h5py
+import json
+from eval.recallevalv2 import Evaluation
+import sys
+sys.path.append('..')
+from breastclip.scheduler import build_scheduler
 
-
-def evaluate(model, dataloader, output_path, accelerator, exp_num):
+def evaluate(model, dataloader, accelerator, exp_num):
     """ Evaluate and Save embeddings for experiment in HDF5 format with proper distributed handling"""
     model.eval()
-    embeddings = {"text_embeddings": [], "image_embeddings": []}
+    dataset_length = len(dataloader.dataset) 
+    embeddings = {"text_embeddings": [], "image_embeddings": [], "accession_numbers": []}
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Generating embeddings", 
@@ -32,16 +38,27 @@ def evaluate(model, dataloader, output_path, accelerator, exp_num):
             # Gather embeddings across all GPUs
             image_embeds = accelerator.gather(outputs["image_embeddings"].detach())
             text_embeds = accelerator.gather(outputs["text_embeddings"].detach())
+            acc_numbers = batch["acc"]  # List of strings
+            if accelerator.use_distributed:
+                # Gather strings across processes
+                acc_numbers = accelerator.gather_for_metrics(acc_numbers)
 
             if accelerator.is_local_main_process:
                 embeddings["image_embeddings"].append(image_embeds.cpu().float().numpy())
                 embeddings["text_embeddings"].append(text_embeds.cpu().float().numpy())
+                embeddings["accession_numbers"].extend(acc_numbers)  # Append strings directly
+
 
     # Only main process saves the final file
     if accelerator.is_local_main_process:
         # Concatenate all batches
-        image_features = np.concatenate(embeddings["image_embeddings"])
-        text_features = np.concatenate(embeddings["text_embeddings"])
+        image_features = np.concatenate(embeddings["image_embeddings"])[0:dataset_length]
+        text_features = np.concatenate(embeddings["text_embeddings"])[0:dataset_length]
+        accession_numbers = embeddings["accession_numbers"]
+        
+        print(f"Image Features Shape: {image_features.shape}")
+        print(f"Text Features Shape: {text_features.shape}")
+        print(f"Accession Numbers Shape: {len(accession_numbers)}")
 
         # Save to HDF5 with metadata
         output_path = f"embeddings_exp{exp_num}.h5"
@@ -50,12 +67,17 @@ def evaluate(model, dataloader, output_path, accelerator, exp_num):
                             chunks=True, compression="gzip")
             f.create_dataset("txt_features", data=text_features,
                             chunks=True, compression="gzip")
+            f.create_dataset("accession_numbers", data=accession_numbers,
+                            chunks=True, compression="gzip")
             f.attrs["num_samples"] = len(image_features)
             f.attrs["embedding_dim"] = image_features.shape[1]
         
         print(f"Saved embeddings to {output_path} with shape {image_features.shape}")
-
-
+        # output_path = os.path.abspath(output_path)
+        # # Evaluate
+        # evaluator = Evaluation(modelname='multiview', config=config, exp_num=exp_num, embeddings_path=output_path)
+        # results_df = evaluator.run_eval()
+        # print(results_df)
 
 
 def validate(model, dataloader, accelerator):
@@ -81,13 +103,13 @@ def train(model, dataloader, val_dataloader, epochs, config, accelerator, writer
     max_grad_norm = config.get('max_grad_norm', 1.0)
 
     for epoch in range(epochs):
-        if config['selective_sampling'] and accelerator.is_local_main_process:
-            dataloader.dataset.shuffle(
-                bs=config['batch_size'],
-                rare_grp_ratio=config['rare_grp_ratio'],
-                batch_shuffle=config['batch_shuffle']
-            )
-            accelerator.wait_for_everyone()
+        # if config['selective_sampling'] and accelerator.is_local_main_process:
+        #     dataloader.dataset.shuffle(
+        #         bs=config['batch_size'],
+        #         rare_grp_ratio=config['rare_grp_ratio'],
+        #         batch_shuffle=config['batch_shuffle']
+        #     )
+            # accelerator.wait_for_everyone()
 
         total_loss = 0.0
         progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{epochs}", 
@@ -102,8 +124,12 @@ def train(model, dataloader, val_dataloader, epochs, config, accelerator, writer
                                        output["logit_scale"])
                 accelerator.backward(loss)
                 
-                if max_grad_norm > 0:
-                    accelerator.clip_grad_norm_(model.parameters(), max_grad_norm)
+                # if max_grad_norm > 0:
+                #     if accelerator.sync_gradients:  # Critical check
+                #         # Required for AMP compatibility
+                #         accelerator.unscale_gradients(optimizer)
+                #         accelerator.clip_grad_norm_(model.parameters(), max_grad_norm)
+        
                 
                 optimizer.step()
 
@@ -209,7 +235,7 @@ def main():
     else:
         writer = None
         logger = None
-
+    
     # Model and Data
     with accelerator.main_process_first():
         #only load once
@@ -221,7 +247,20 @@ def main():
     optimizer = AdamW(model.image_model.parameters(),  # Train image model
                      lr=float(config["learning_rate"]), 
                      weight_decay=config["weight_decay"])
-    scheduler = CosineAnnealingLR(optimizer, T_max=config["epochs"])
+    lr_config = config["lr_config"] 
+    warmup_epochs = lr_config['config']['warmup_epochs']
+    total_epochs = lr_config['config']['total_epochs']
+    warmup_steps = warmup_epochs
+    total_steps = total_epochs
+
+    # Update lr_config with the calculated steps
+    lr_config['config'].update({
+        'total_steps': total_steps,
+        'warmup_steps': warmup_steps
+    })
+    print("--Lr config-- : ", lr_config)
+    scheduler = build_scheduler(optimizer, lr_config)
+    # scheduler = CosineAnnealingLR(optimizer, T_max=config["epochs"])
 
     # Prepare with Accelerator
     model, optimizer, train_dataloader, val_dataloader, scheduler = accelerator.prepare(
@@ -232,7 +271,7 @@ def main():
         model=model,
         dataloader=train_dataloader,
         val_dataloader=val_dataloader,
-        epochs=config["epochs"],
+        epochs=config["lr_config"]["config"]["total_epochs"],
         config=config,
         accelerator=accelerator,
         writer=writer,
@@ -241,6 +280,10 @@ def main():
         scheduler=scheduler
     )
 
+    test_dataloader = load_dataloader(config, tokenizer, split=None)
+    accelerator.print(f"====Data Loader length {len(test_dataloader.dataset)}=====")
+    test_dataloader = accelerator.prepare(test_dataloader)
+    evaluate(model=model, dataloader=test_dataloader, accelerator=accelerator, exp_num=config['experiment'])
     if accelerator.is_local_main_process:
         writer.close()
 if __name__ == "__main__":

@@ -34,7 +34,17 @@ class Evaluation:
         vc = train_all.group_id.value_counts()
         self.rare_grp_ids = set(vc[20:].index)
         self.freq_ids = set(vc[:20].index)
-
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    def run_eval(self):
+        k_values = [1,5,10]
+        scores_i2t,scores_t2i,embeddings = self.evaluate()
+        results_df = self.itm_eval_groups(scores_i2t, scores_t2i, self.data_loader.dataset.ann["group_id"].to_dict(), self.data_loader.dataset.ann["group_id"].to_dict(), k_values=k_values)
+        csvpath =f"{self.root_dir}{self.modelname}-test-recall@1_5_10-ml256.csv"
+        results_df.to_csv(csvpath)
+        resultdf = self.create_metrics_table_with_ci(results_df,k_values=k_values)
+        resultdf.to_csv(f'{self.modelname}-test-recall@1_5_10')
+        return resultdf
 
     def get_embeddings_image(self, image):
         if self.modelname == 'ALBEF':
@@ -57,8 +67,8 @@ class Evaluation:
         return text_embed
 
     def evaluate(self):
-
-        csvpath =f"{root_dir}{self.modelname}-test-recall@1_5_10-ml256.csv"
+        device = self.device
+        csvpath =f"{self.root_dir}{self.modelname}-test-recall@1_5_10-ml256.csv"
         if os.path.exists(csvpath):
             df = pd.read_csv(csvpath)
             evaluator.create_metrics_table_with_ci(df,k_values) 
@@ -68,13 +78,9 @@ class Evaluation:
         print('Computing features for evaluation...')
         start_time = time.time()
 
-        texts = self.data_loader.dataset.text
-        num_text = len(texts)
-        print(num_text, self.data_loader.dataset.__len__())
-        text_bs = 256
-        text_embeds = []
-        root_dir = '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/embeddings'
-        savepath = f'{root_dir}/{self.modelname}img_feats_g20_mammo_ML256.npz'
+    
+        self.root_dir = '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/embeddings'
+        savepath = f'{self.root_dir}/{self.modelname}img_feats_g20_mammo_ML256.npz'
         embedpath = {'albef': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/ALBEF/data/img_feats_g20_b3_new_preprocess_unique_ML256.hdf5',
                      'mammoclip': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/embeddings/img_feats_g20_mammo_ML256.hdf5',
                      'medimageinsight': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/embeddings/img_feats_g20_MedImageInsight.h5',
@@ -87,7 +93,7 @@ class Evaluation:
                 availablekeys = list(file.keys())
                 textkey = [key for key in availablekeys if key.startswith('t')][0]
                 availablekeys.remove(textkey)
-                imgkey = availablekeys[0]
+                imgkey = [key for key in availablekeys if ('feat' in key or 'embedding' in key)][0]
                 print("image key", imgkey, "text key", textkey)
                 textfeat = np.array(file[textkey])
                 imgfeat = np.array(file[imgkey])
@@ -99,11 +105,18 @@ class Evaluation:
             elif self.modelname.lower() == 'mammoclip':
                 self.model, self.tokenizer = self.load_mammoclip_model()
             elif self.modelname.lower() == 'multiview':
-                self.model, self.tokenizer = self.load_mutliview()
+                if not self.model :
+                    self.model, self.tokenizer = self.load_mutliview()
             else:
                 self.model, self.tokenizer = None, None
             self.model.eval()
             self.model.to(device)
+
+            texts = self.data_loader.dataset.text
+            num_text = len(texts)
+            print(num_text, self.data_loader.dataset.__len__())
+            text_bs = 256
+            text_embeds = []
             for i in tqdm(range(0, num_text, text_bs), desc="Processing Texts"):
                 text = texts[i: min(num_text, i + text_bs)]
                 text_input = self.tokenizer(text, padding='max_length', truncation=True, max_length=256,
@@ -145,12 +158,18 @@ class Evaluation:
             print("Sufficient GPU memory available.")
             image_embeds = image_embeds.to(device)
             text_embeds = text_embeds.to(device)
-        print("----------Shape-----------: ", image_embeds.shape, text_embeds.shape)
-        sims_matrix = image_embeds @ text_embeds.t()
-        sims_matrix = sims_matrix.cpu()
+            print("----------Shape-----------: ", image_embeds.shape, text_embeds.shape)
+            batch_size = 256
+            num_images = image_embeds.shape[0]
+            num_texts = text_embeds.shape[0]
+            sims_matrix = torch.zeros((num_images, num_texts))
+            for i in range(0, num_images, batch_size):
+                image_batch = image_embeds[i:i+batch_size]
+                sims_batch = torch.matmul(image_batch, text_embeds.t())
+                sims_matrix[i:i+batch_size] = sims_batch.cpu()
 
-        score_matrix_i2t = torch.full((len(self.data_loader.dataset.image), len(text_embeds)), -100.0)
-        score_matrix_t2i = torch.full((len(text_embeds), len(self.data_loader.dataset.image)), -100.0)
+        score_matrix_i2t = torch.full((len(self.data_loader.dataset), len(text_embeds)), -100.0)
+        score_matrix_t2i = torch.full((len(text_embeds), len(self.data_loader.dataset)), -100.0)
 
         topk_sim, topk_idx = torch.topk(sims_matrix, k=20, dim=1)
         score_matrix_i2t.scatter_(1, topk_idx, topk_sim)
@@ -244,7 +263,7 @@ class Evaluation:
             'i2t_recall': np.zeros(num_samples),
             't2i_recall': np.zeros(num_samples),
             'group_id': img_group_ids,
-            'group_type': ['rare' if gid in rare_ids else 'common' for gid in img_group_ids] if rare_ids else [
+            'group_type': ['rare' if gid in self.rare_grp_ids else 'common' for gid in img_group_ids] if self.rare_grp_ids else [
                 'common'] * num_samples
         }
 
@@ -381,7 +400,7 @@ class Evaluation:
 def main(config,modelname):
     evaluator = Evaluation(modelname=modelname,config=config)
     k_values = [1,5,10]
-    csvpath =f"{root_dir}{modelname}-test-recall@1_5_10-ml256.csv"
+    csvpath =f"{self.root_dir}{modelname}-test-recall@1_5_10-ml256.csv"
     if os.path.exists(csvpath):
         df = pd.read_csv(csvpath)
         evaluator.reportmetrics(df,k_values)
@@ -406,7 +425,7 @@ def main(config,modelname):
     
     # scores_i2t,scores_t2i,embeddings = evaluation( dataloader, tokenizer, device, config, modelname)
     # results_df = itm_eval_groups(scores_i2t, scores_t2i, dataloader.dataset.txt2grp, dataloader.dataset.img2grp, k_values=k_values, rare_ids = self.rare_grp_ids)
-    # results_df.to_csv(f"{root_dir}{modelname}-test-recall@1_5_10-ml256.csv")
+    # results_df.to_csv(f"{self.root_dir}{modelname}-test-recall@1_5_10-ml256.csv")
     # reportmetrics(results_df,k_values=k_values)
     
     
