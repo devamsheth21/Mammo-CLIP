@@ -62,12 +62,15 @@ class ft_uw_individual(Dataset):
         caption = pre_caption(item['findings'], self.max_words) 
         group_id = item['group_id']
         accession = item['AccessionNumber']
+        birads = item['birads']
+        ## BIRADS 0,1,2,3,6 ( Need to combine in 2 OR 3 CLASSES)
         return {
             "image": images,
             "text": caption,
             "group": group_id,
             "view_seq":view_seq,
             "acc": accession,
+            "birads": birads
         }
 
     def collate_fn(self, instances):
@@ -75,6 +78,7 @@ class ft_uw_individual(Dataset):
         texts = [ins["text"] for ins in instances] #B,
         view_seqs = torch.stack([ins["view_seq"] for ins in instances], dim=0)  # (B, 2)
         accessions = [ins['acc'] for ins in instances]
+        birads = [ins['birads'] for ins in instances]
         text_tokens = self.tokenizer(
             texts, padding="max_length", truncation=True, return_tensors="pt", max_length=256
         )
@@ -86,7 +90,8 @@ class ft_uw_individual(Dataset):
             "acc": accessions,
             "group": labels,
             "text_tokens": text_tokens,
-            "view_seqs" : view_seqs
+            "view_seqs" : view_seqs,
+            "birads": birads
         }
 
     def shuffle(self, bs=8, rare_grp_ratio=0.375, batch_shuffle=False):

@@ -50,3 +50,19 @@ docs/_build/
 
 # Windows system files
 Thumbs.db
+
+# TensorBoard event log files
+event.out.tfevents*
+
+# # Logs
+*.log
+# MyPy
+.mypy_cache/
+# Pytest
+.cache/
+
+# Checkpoints, embeddings, and CSVs
+*.pth
+*.ckpt
+*.emb
+*.csv
