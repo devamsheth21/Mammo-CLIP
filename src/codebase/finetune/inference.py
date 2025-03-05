@@ -51,7 +51,7 @@ def save_embeddings(model, dataloader, output_path, accelerator, exp_num):
         print("Image embeddings shape:", image_features.shape)
         print("Text embeddings shape:", text_features.shape)
         # Save to HDF5 with metadata
-        output_path = f"embeddings_exp{exp_num}.h5"
+        output_path = f"embeddings/embeddings_exp{exp_num}.h5"
         with h5py.File(output_path, "w") as f:
             f.create_dataset("features", data=image_features,
                             chunks=True, compression="gzip")
@@ -66,13 +66,13 @@ def inference_pipeline(checkpoint_path, data_config, exp_num):
     accelerator = Accelerator()
     device = accelerator.device
     
-    with open("finetune-config.yaml", "r") as f:
+    with open("configs/finetune-config.yaml", "r") as f:
         config = yaml.safe_load(f)
     # Load checkpoint
     config['device'] = device
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
     
-    with init_empty_weights():
+    with init_empty_weights(): # For initializing skeleton Model
         model, tokenizer = load_model(config)
     model.load_state_dict(checkpoint["model"], assign=True)
     

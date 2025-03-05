@@ -253,7 +253,7 @@ class Evaluation:
             'albef': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/ALBEF/data/img_feats_g20_b3_new_preprocess_unique_ML256.hdf5',
             'mammoclip': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/embeddings/img_feats_g20_mammo_ML256.hdf5',
             'medimageinsight': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/embeddings/img_feats_g20_MedImageInsight.h5',
-            'multiview': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/Mammo-CLIP/src/codebase/finetune/embeddings_exp1.h5'
+            'multiview': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/Mammo-CLIP/src/codebase/finetune/embeddings/embeddings_exp1.h5'
         }
         return embedpath.get(self.modelname.lower(), 'None')
 
@@ -364,7 +364,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--modelname', default = 'ALBEF')
-    parser.add_argument('--config_path', default = './finetune-config.yaml')
+    parser.add_argument('--config_path', default = './configs/finetune-config.yaml')
     parser.add_argument('--csvfile', default = None)
     parser.add_argument('--exp_num',default = None)
     parser.add_argument('--embeddingfile',default =None)

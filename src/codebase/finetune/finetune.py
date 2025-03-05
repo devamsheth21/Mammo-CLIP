@@ -110,7 +110,7 @@ def save_loss_curve(loss_history, val_loss_history, experiment):
 
 def main():
     # Load Config
-    with open("finetune-config.yaml", "r") as f:
+    with open("configs/finetune-config.yaml", "r") as f:
         config = yaml.safe_load(f)
     # Set Random Seed
     set_random_seed(config["seed"])

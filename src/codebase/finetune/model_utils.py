@@ -61,7 +61,7 @@ def load_model(config):
     # Load checkpoint
     clip_chk_pt_path = "/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/checkpoints/b5-model-best-epoch-7.tar"
     ckpt = torch.load(clip_chk_pt_path, map_location="cpu")
-    device = config['device']
+    # device = config['device']
     args = SimpleNamespace(**config['model_params'])
     modelname = config['modelname']
 

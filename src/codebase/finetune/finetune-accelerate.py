@@ -61,7 +61,7 @@ def evaluate(model, dataloader, accelerator, exp_num):
         print(f"Accession Numbers Shape: {len(accession_numbers)}")
 
         # Save to HDF5 with metadata
-        output_path = f"embeddings_exp{exp_num}.h5"
+        output_path = f"embeddings/embeddings_exp{exp_num}.h5"
         with h5py.File(output_path, "w") as f:
             f.create_dataset("features", data=image_features,
                             chunks=True, compression="gzip")
@@ -202,13 +202,13 @@ def save_loss_curve(loss_history, val_loss_history, experiment):
     plt.xlabel("Epochs")
     plt.ylabel("Loss")
     plt.legend()
-    plt.savefig(f"results/loss_curve_{experiment}.png")
+    plt.savefig(f"results/exp{config['experiment']}/loss_curve_{experiment}.png")
     plt.close()
 
 
 def main():
     # Config loading
-    with open("finetune-config.yaml", "r") as f:
+    with open("configs/finetune-config.yaml", "r") as f:
         config = yaml.safe_load(f)
 
     # Initialize accelerator first
@@ -240,8 +240,8 @@ def main():
     with accelerator.main_process_first():
         #only load once
         model, tokenizer = load_model(config)
-    train_dataloader = load_dataloader(config, tokenizer, split="train")
-    val_dataloader = load_dataloader(config, tokenizer, split="val")
+    train_dataloader = load_dataloader(config, tokenizer=tokenizer, split="train")
+    val_dataloader = load_dataloader(config, tokenizer=tokenizer, split="val")
     accelerator.print(f"====Data Loader length {len(train_dataloader.dataset)}=====")
     # Optimizer and Scheduler
     optimizer = AdamW(model.image_model.parameters(),  # Train image model

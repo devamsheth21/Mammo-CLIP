@@ -84,7 +84,7 @@ class Evaluation:
         embedpath = {'albef': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/ALBEF/data/img_feats_g20_b3_new_preprocess_unique_ML256.hdf5',
                      'mammoclip': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/embeddings/img_feats_g20_mammo_ML256.hdf5',
                      'medimageinsight': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/embeddings/img_feats_g20_MedImageInsight.h5',
-                     'multiview': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/Mammo-CLIP/src/codebase/finetune/embeddings_exp1.h5'
+                     'multiview': '/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/Mammo-CLIP/src/codebase/finetune/embeddings/embeddings_exp1.h5'
                      }
         hpath = embedpath.get(self.modelname.lower(), 'None')
         if os.path.exists(hpath):

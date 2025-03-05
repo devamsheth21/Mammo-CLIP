@@ -13,5 +13,9 @@ cd /mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/Mammo-CLIP/src/codeba
 # Load the environment
 conda activate mammoalbef
 
+# To specify cuda devices, SELECT devices which have full memory free : 
+# export CUDA_VISIBLE_DEVICES=0,1,2,3
+# CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch finetune-accelerate.py
+
 # Launch the finetuning script with accelerate
 accelerate launch finetune-accelerate.py

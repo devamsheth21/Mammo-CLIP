@@ -17,14 +17,40 @@ from dataset.utils import pre_caption, scale_0_1
 
 import pandas as pd
 from torchvision import transforms
-
+from collections import defaultdict
 
 class ft_uw_individual(Dataset):
+    """
+    Dataset Class which processes individual mammograms and handles missing laterality by flipping the images.
+    It processes the batch as 
+            - "images": Tensor of shape (B, 2, C, H, W) representing the stacked images.
+            - "text_tokens": Tokenized text captions. Shape: (B, L) where B is the batch size and L is the maximum sequence length.
+            - "view_seq": Tensor of shape (B,2).
+            - "birads": List of BIRADS labels."
+            - "acc": List of accession numbers.
+            - "group": List of group IDs.
+    Args:
+        ann_file (str): Path to the annotation file.
+        transform (callable): A function/transform that takes in an PIL image and returns a transformed version.
+        tokenizer (object): Tokenizer object for text processing.
+        max_words (int, optional): Maximum number of words in the caption. Defaults to 500.
+        select (bool, optional): Flag to enable selective sampling. Defaults to False.
+        test (bool, optional): Flag to indicate testing on a fraction of data. Defaults to False.
+        split (str, optional): Split name for the dataset. Defaults to "train".
+
+    Returns:
+        dict: A dictionary containing the following keys:
+            - "image": Tensor of shape (B, 2, C, H, W) representing the stacked images.
+            - "text": List of text captions.
+            - "group": List of group IDs.
+            - "view_seq": Tensor of shape (B, 2) representing the view sequence.
+            - "acc": List of accession numbers.
+            - "birads": List of BIRADS labels.
+    """
     def __init__(self, ann_file, transform, tokenizer, max_words=500, select = False , test=False, split = "train"):
         self.ann = pd.read_csv(ann_file)
         self.transform = transform
         self.max_words = max_words
-        self.all_groups =[]
         self.tokenizer = tokenizer
 
         if test:
@@ -83,22 +109,127 @@ class ft_uw_individual(Dataset):
             texts, padding="max_length", truncation=True, return_tensors="pt", max_length=256
         )
 
-        labels = [ins["label"] for ins in instances]
+        groups = [ins["group"] for ins in instances]
 
         return {
             "images": images,
             "acc": accessions,
-            "group": labels,
+            "group": groups,
             "text_tokens": text_tokens,
             "view_seqs" : view_seqs,
             "birads": birads
         }
-
+    ## Shuffle : Can be used after Implementing sekective sampling if needed
     def shuffle(self, bs=8, rare_grp_ratio=0.375, batch_shuffle=False):
         self.ann = self.selective_sampling.shuffle(bs=bs, rare_grp_ratio=rare_grp_ratio, batch_shuffle=batch_shuffle)
             
+class ft_uw_linear_probe(Dataset):
+    """
+    Dataset Class which processes individual mammograms and handles missing laterality by flipping the images.
+    It processes the batch as 
+            - "images": Tensor of shape (B, 2, C, H, W) representing the stacked images.
+            - "view_seq": Tensor of shape (B,2).
+            - "birads": List of BIRADS labels."
+            - "acc": List of accession numbers.
+            - "group": List of group IDs.
+    Args:
+        ann_file (str): Path to the annotation file.
+        transform (callable): A function/transform that takes in an PIL image and returns a transformed version.
+        test (bool, optional): Flag to indicate testing on a fraction of data. Defaults to False.
+        split (str, optional): Split name for the dataset. Defaults to "train".
+
+    Returns:
+        dict: A dictionary containing the following keys:
+            - "image": Tensor of shape (B, 2, C, H, W) representing the stacked images.
+            - "group": List of group IDs.
+            - "view_seq": Tensor of shape (B, 2) representing the view sequence.
+            - "acc": List of accession numbers.
+            - "birads": List of BIRADS labels.
+    """
+    def __init__(self, ann_file, transform, test=False, split="train"):
+        self.ann = pd.read_csv(ann_file)
+        self.transform = transform
+        self.class_counts = defaultdict(list)
+        if test:
+            print("Testing for fraction of data")
+            self.ann = self.ann.sample(frac=0.009, random_state=42)
+        if split:
+            self.ann = self.ann[self.ann["split"] == split]
+        ## Birads Preprocess , drop 3 and 6, Merge 1 and 2 -> 0 and 0 -> 1 for Binary Classification
+        self.ann = self.ann[~self.ann['birads'].isin([3, 6])]
+        self.ann['birads'] = self.ann['birads'].apply(lambda x: 1 if x == 0 else 0)
+        # Count the number of samples in each class
+        class_0_count = self.ann.loc[self.ann['split'] == 'train'][self.ann['birads'] == 0].shape[0]
+        class_1_count = self.ann.loc[self.ann['split'] == 'train'][self.ann['birads'] == 1].shape[0]
+        # Undersample class 0 to match the number of samples in class 1
+        if class_0_count > class_1_count:
+            print('Undersampling class 0')
+            self.ann = self.ann.drop(self.ann[self.ann['split'] == 'train'][self.ann['birads'] == 0].sample(class_0_count - class_1_count, random_state=42).index)
+
+        ## Density Preprocess, drop - 1
+        self.ann = self.ann[~self.ann['density'].isin([-1])]
+        self.class_counts['density'] = self.ann['density'].value_counts(sort=False).sort_index().tolist()
+        self.class_counts['birads'] = self.ann['birads'].value_counts(sort=False).sort_index().tolist()
+
+    def __len__(self):
+        return len(self.ann)
+    
+    def __loadimagepair(self, item):
+        if item['Missing'] == 'R':
+            imageL = Image.open(item['processed_filepath_L']).convert('RGB')
+            imageR = imageL.transpose(method=Image.Transpose.FLIP_LEFT_RIGHT)
+        elif item['Missing'] == 'L':
+            imageR = Image.open(item['processed_filepath_R']).convert('RGB').transpose(method=Image.Transpose.FLIP_LEFT_RIGHT)
+            imageL = imageR.transpose(method=Image.Transpose.FLIP_LEFT_RIGHT)
+        else:
+            imageL = Image.open(item['processed_filepath_L']).convert('RGB')
+            imageR = Image.open(item['processed_filepath_R']).convert('RGB').transpose(method=Image.Transpose.FLIP_LEFT_RIGHT)
+        
+        return self.transform(imageL), self.transform(imageR)
+    
+    def __getitem__(self, index):
+        item = self.ann.iloc[index]
+        imageL, imageR = self.__loadimagepair(item)
+        # Stack images: (2, C, H, W)
+        images = torch.stack([imageL, imageR], dim=0)    
+        # View sequence (e.g., [0, 1] for L/R)
+        view_seq = torch.tensor([0, 1], dtype=torch.long)
+        group_id = item['group_id']
+        accession = item['AccessionNumber']
+        birads = item['birads']
+        density  = item['density']
+        ## BIRADS 0,1,2,3,6 ( Need to combine in 2 OR 3 CLASSES)
+        return {
+            "image": images,
+            "group": group_id,
+            "view_seq": view_seq,
+            "acc": accession,
+            "birads": birads,
+            "density": density
+        }
+
+    def collate_fn(self, instances):
+        images = torch.stack([ins["image"] for ins in instances], dim=0) # B,2,C,H,W
+        view_seqs = torch.stack([ins["view_seq"] for ins in instances], dim=0)  # (B, 2)
+        accessions = [ins['acc'] for ins in instances]
+        birads = [ins['birads'] for ins in instances]
+        density = [ins['density'] for ins in instances]
+        groups = [ins["group"] for ins in instances]
+
+        return {
+            "images": images,
+            "acc": accessions,
+            "group": groups,
+            "view_seqs": view_seqs,
+            "birads": torch.tensor(birads),
+            "density": torch.Tensor(density)
+        }
 
 class ft_train_dataset_group(Dataset):
+    """
+    Dataset Class which Implements, batches to include negative and positive pairs ( group-wise ) , to enable
+    Group contrastive Learning 
+    """
     def __init__(self, ann_file, transform, image_root,tokenizer, max_words=30, num_samples=20, select= None):
         self.ann = pd.read_json(ann_file)
         self.transform = transform
@@ -115,6 +246,8 @@ class ft_train_dataset_group(Dataset):
         ])
         # Track group sizes
         self.ann['count'] = self.ann.groupby('group_id')['group_id'].transform('count')
+
+        ## Selective Sampling needs to be implemented.
         if select:
             self.selective_sampling = SelectiveSampling(data = self.ann)
         else:
