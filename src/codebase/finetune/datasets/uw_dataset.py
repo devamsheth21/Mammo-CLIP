@@ -122,7 +122,22 @@ class ft_uw_individual(Dataset):
     ## Shuffle : Can be used after Implementing sekective sampling if needed
     def shuffle(self, bs=8, rare_grp_ratio=0.375, batch_shuffle=False):
         self.ann = self.selective_sampling.shuffle(bs=bs, rare_grp_ratio=rare_grp_ratio, batch_shuffle=batch_shuffle)
-            
+
+def undersample(df, column, split='train'):
+    """Undersamples the majority class(es) in the specified column."""
+    class_counts = df[df['split'] == split][column].value_counts()
+    print("Distribution before balancing:", class_counts)
+    min_class_count = class_counts.min()
+    print("min class count", min_class_count)
+    undersampled_df = pd.concat([
+        df[(df['split'] == split) & (df[column] == class_label)].sample(min_class_count, random_state=42)
+        for class_label in class_counts.index
+    ])
+    print("Distribution after undersampling:", undersampled_df[column].value_counts())
+    return pd.concat([df[df['split'] != split], undersampled_df])
+
+
+
 class ft_uw_linear_probe(Dataset):
     """
     Dataset Class which processes individual mammograms and handles missing laterality by flipping the images.
@@ -137,6 +152,7 @@ class ft_uw_linear_probe(Dataset):
         transform (callable): A function/transform that takes in an PIL image and returns a transformed version.
         test (bool, optional): Flag to indicate testing on a fraction of data. Defaults to False.
         split (str, optional): Split name for the dataset. Defaults to "train".
+        classname (str,optional) : Classname to balance for classification.
 
     Returns:
         dict: A dictionary containing the following keys:
@@ -146,7 +162,7 @@ class ft_uw_linear_probe(Dataset):
             - "acc": List of accession numbers.
             - "birads": List of BIRADS labels.
     """
-    def __init__(self, ann_file, transform, test=False, split="train"):
+    def __init__(self, ann_file, transform, test=False, split="train", classname=None):
         self.ann = pd.read_csv(ann_file)
         self.transform = transform
         self.class_counts = defaultdict(list)
@@ -155,21 +171,45 @@ class ft_uw_linear_probe(Dataset):
             self.ann = self.ann.sample(frac=0.009, random_state=42)
         if split:
             self.ann = self.ann[self.ann["split"] == split]
-        ## Birads Preprocess , drop 3 and 6, Merge 1 and 2 -> 0 and 0 -> 1 for Binary Classification
+        # Birads Preprocess: drop 3 and 6, merge 1 and 2 -> 0 and 0 -> 1 for Binary Classification
+        # For Multiclass Classification, drop 3 and 6
         self.ann = self.ann[~self.ann['birads'].isin([3, 6])]
-        self.ann['birads'] = self.ann['birads'].apply(lambda x: 1 if x == 0 else 0)
-        # Count the number of samples in each class
-        class_0_count = self.ann.loc[self.ann['split'] == 'train'][self.ann['birads'] == 0].shape[0]
-        class_1_count = self.ann.loc[self.ann['split'] == 'train'][self.ann['birads'] == 1].shape[0]
-        # Undersample class 0 to match the number of samples in class 1
-        if class_0_count > class_1_count:
-            print('Undersampling class 0')
-            self.ann = self.ann.drop(self.ann[self.ann['split'] == 'train'][self.ann['birads'] == 0].sample(class_0_count - class_1_count, random_state=42).index)
+        # if classname == 'birads':
+        #     self.ann['birads'] = self.ann['birads'].apply(lambda x: 1 if x == 0 else 0)
 
-        ## Density Preprocess, drop - 1
+        # Density Preprocess: drop -1
         self.ann = self.ann[~self.ann['density'].isin([-1])]
+        self.ann['density'] = self.ann['density'].astype(int)
+        # if split=='train':
+        # ## Undersample
+        #     if classname == 'birads':
+        #         # Count the number of samples in each class
+        #         class_0_count = self.ann.loc[(self.ann['split'] == 'train') & (self.ann['birads'] == 0)].shape[0]
+        #         class_1_count = self.ann.loc[(self.ann['split'] == 'train') & (self.ann['birads'] == 1)].shape[0]
+        #         # Undersample class 0 to match the number of samples in class 1
+        #         if class_0_count > class_1_count:
+        #             print('Undersampling class 0')
+        #             class_0_indices = self.ann.loc[(self.ann['split'] == 'train') & (self.ann['birads'] == 0)].sample(class_0_count - class_1_count, random_state=42).index
+        #             self.ann = self.ann.drop(class_0_indices)
+        #     else:
+        #         # Undersample majority classes to minority class
+        #         class_counts = self.ann.loc[self.ann['split'] == 'train'].density.value_counts()
+        #         print(" Distribution before balancing : ", class_counts)
+        #         min_class_count = min(class_counts)
+        #         for class_label,count in class_counts.items():
+        #             if count > min_class_count:
+        #                 count = count - min_class_count
+        #                 class_indices = self.ann.loc[(self.ann['split'] == 'train') & (self.ann['density'] == class_label)].sample(count, random_state=42).index
+        #                 self.ann = self.ann.drop(class_indices)
+        #         print(" Distribution after Undersampling : ", self.ann.loc[self.ann['split'] == 'train'].density.value_counts() )
+
+        # Apply undersampling if in training split and a balancing column is specified.
+        if split == 'train' and classname is not None:
+            print(f"Applying undersampling for '{classname}' column")
+            self.ann = undersample(self.ann, classname, split=split)
+            
         self.class_counts['density'] = self.ann['density'].value_counts(sort=False).sort_index().tolist()
-        self.class_counts['birads'] = self.ann['birads'].value_counts(sort=False).sort_index().tolist()
+        self.class_counts[classname] = self.ann[classname].value_counts(sort=False).sort_index().tolist()
 
     def __len__(self):
         return len(self.ann)
@@ -222,7 +262,7 @@ class ft_uw_linear_probe(Dataset):
             "group": groups,
             "view_seqs": view_seqs,
             "birads": torch.tensor(birads),
-            "density": torch.Tensor(density)
+            "density": torch.tensor(density)
         }
 
 class ft_train_dataset_group(Dataset):

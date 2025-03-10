@@ -56,6 +56,8 @@ event.out.tfevents*
 
 # # Logs
 *.log
+# Exclude PNGs from finetuning folder
+finetune/*.png
 # MyPy
 .mypy_cache/
 # Pytest
@@ -66,3 +68,4 @@ event.out.tfevents*
 *.ckpt
 *.emb
 *.csv
+*.h5

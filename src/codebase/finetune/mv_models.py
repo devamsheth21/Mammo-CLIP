@@ -14,5 +14,5 @@ class VisionLinearProbe(nn.Module):
             images, view_seq = x['images'], x['view_seqs']
             features = self.vision_model(images, view_seq)
         logits = self.linear(features)
-        probabilities = self.softmax(logits)
-        return probabilities
+        # probabilities = self.softmax(logits)
+        return logits

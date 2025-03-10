@@ -44,7 +44,8 @@ def load_dataloader(config, tokenizer=None, split="train"):
             config['train_file'],
             transform=ft_transform,
             split=split,
-            test=config.get('test',False)
+            test=config.get('test',False),
+            classname = config.get('classname',None)
         )
     else : 
         print(f'invalid dataname {dataname}')
@@ -58,6 +59,6 @@ def load_dataloader(config, tokenizer=None, split="train"):
         num_workers=8,
         persistent_workers=True,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=1,
         collate_fn=train_dataset.collate_fn,
     )

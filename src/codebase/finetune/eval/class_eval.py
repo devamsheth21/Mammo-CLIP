@@ -11,7 +11,7 @@ import yaml
 from mv_models import VisionLinearProbe
 import argparse
 
-def test_linear_probe(model, dataloader, accelerator = None):
+def test_linear_probe(model, dataloader, classname, accelerator = None):
     model.eval()
     correct = 0
     total = 0
@@ -22,21 +22,22 @@ def test_linear_probe(model, dataloader, accelerator = None):
         for batch in progress_bar:
             batch = {key: value.to(device) if isinstance(value, torch.Tensor) else value for key, value in batch.items()}
             outputs = model(batch)
+            probabilities = torch.nn.functional.softmax(outputs, dim=1)
             _, predicted = torch.max(outputs, 1)
             if accelerator is not None:
-                predicted, labels = accelerator.gather_for_metrics((predicted, batch["birads"]))
+                predicted, labels = accelerator.gather_for_metrics((predicted, batch[classname]))
             else:
-                labels = batch["birads"]
+                labels = batch[classname]
             total += labels.cpu().shape[0]
             correct += (predicted == labels).sum().item()
             predictions.extend(predicted.cpu().tolist())
             targets.extend(labels.cpu().tolist())
             progress_bar.set_postfix(acc=correct / total)
     accuracy = 100 * correct / total
+    print(f"Test Accuracy: {accuracy:.2f}%")
+    return  probabilities, predictions, targets
 
-    return accuracy, predictions, targets
-
-def main(classname):
+def main(classname, args=None):
     # Load config
     with open("configs/linear-probe-config.yaml", "r") as f:
         config = yaml.safe_load(f)
@@ -45,6 +46,12 @@ def main(classname):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config['device'] = device
     print(f"Device: {device}")
+
+    for key, value in vars(args).items():
+        if value is not None:
+            print(f"{key} chnaging to {value}")
+            config[key] = value
+
     if classname :
         config['classname'] = classname
     # Load model
@@ -60,6 +67,7 @@ def main(classname):
 
     # Load the best checkpoint
     best_checkpoint_path = f"checkpoints/lp{config.get('classname','')}_exp{config['experiment']}/lp{config.get('classname','')}_exp{config['experiment']}_best.pth"
+    # best_checkpoint_path = "/mnt/PURENFS/SalkowskiPreprocessedBreast/code/MammoCLIP/Mammo-CLIP/src/codebase/finetune/checkpoints/lpbirads_exp1/lpbirads_exp1_epoch1.pth"
     best_checkpoint = torch.load(best_checkpoint_path, map_location=device)
     linear_probe_model.load_state_dict(best_checkpoint["model"])
     
@@ -67,19 +75,20 @@ def main(classname):
     test_dataloader = load_dataloader(config, split="test")
     experiment=config['experiment']
     # Evaluate the model
-    accuracy, predictions, targets = test_linear_probe(linear_probe_model, test_dataloader, accelerator=None)
-    evaluate_model(predictions, targets, f"lp_exp{experiment}")
-    print(f"Test Accuracy: {accuracy:.2f}%")
+    probabilities, predictions, targets = test_linear_probe(linear_probe_model, test_dataloader, classname=classname, accelerator=None)
+    evaluate_model(probabilities, predictions, targets, f"lp{classname}_exp{experiment}")
     print(classification_report(targets, predictions))
     print(f"ROC AUC Score: {roc_auc_score(targets, predictions):.4f}")
     
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Mammo-CLIP Linear Probe Evaluation")
-    parser.add_argument("--classname", type=str, default=None, help="Class name for the linear probe")
+    parser.add_argument("--classname", type=str, default="birads", help="Classification for Birads or density")
+    parser.add_argument("--num_classes", type=int, default=None, help="Number of classes")
+    parser.add_argument("--experiment", type=str, default='1', help="Experiment number")
     return parser.parse_args()
 
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args = parse_arguments()
     classname = args.classname
-    main(classname)
+    main(classname, args)

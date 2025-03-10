@@ -24,11 +24,13 @@ python eval/recallevalv2.py --modelname='multiview' --exp_num 2 --embeddingfile 
 5. `eval/class_eval.py`: This script is used to evaluate classification performance metrics for the specified class, such as "birads" or "density". To run the script, use the following command: 
 ```
 python eval/class_eval.py --classname=birads
+python eval/class_eval.py --classname birads --num_classes 3 --experiment birads3-0
 ```
 
 6. `vision-lp.py`: This script is used to perform linear probing on the fine-tuned model by adding a linear layer `(512, n_classes)` on top of the vision model for the specified class, such as "birads" or "density". To run the script, use the following command: 
 ```
 python vision-lp.py --classname=birads
+python vision-lp.py --classname birads --epochs 10 --experiment birads3-1  --num_classes 3
 ```
 
 
@@ -71,7 +73,4 @@ python preprocess/preprocess_data.py
 ## Running the Project
 
 To run the various scripts, use the provided commands in the respective sections above. Make sure to adjust the paths and parameters as needed for your specific setup.
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more details.
+.

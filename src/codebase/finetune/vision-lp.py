@@ -7,6 +7,7 @@ import yaml
 from model_utils import load_model
 from mv_utils import set_random_seed, save_loss_curve
 import argparse
+from typing import Union
 import logging
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
@@ -34,7 +35,7 @@ class VisionLinearProbe(nn.Module):
         # probabilities = self.softmax(logits)
         return logits
 
-def save_checkpoint(model, optimizer, epoch, best_val_loss, best_val_acc, config, is_best=False):
+def save_checkpoint(model, optimizer, epoch, best_val_loss, best_val_acc, config, loss_history, val_loss_history, val_acc_history, is_best=False):
     checkpoint = {
         "epoch": epoch,
         "model": model.state_dict(),
@@ -42,8 +43,12 @@ def save_checkpoint(model, optimizer, epoch, best_val_loss, best_val_acc, config
         "config": config,
         "best_val_loss": best_val_loss,
         "best_val_acc": best_val_acc,
+        "loss_history": loss_history,
+        "val_loss_history": val_loss_history,
+        "val_acc_history": val_acc_history,
     }
     filename = f"checkpoints/lp{config['classname']}_exp{config['experiment']}/lp{config['classname']}_exp{config['experiment']}_best.pth" if is_best else f"checkpoints/lp{config['classname']}_exp{config['experiment']}/lp{config['classname']}_exp{config['experiment']}_epoch{epoch}.pth"
+    print(f"Saving checkpoint at epoch {epoch}... at : {filename}")
     torch.save(checkpoint, filename)
 
 def validate_and_calculate_accuracy(model, dataloader, criterion, device, config):
@@ -67,7 +72,7 @@ def validate_and_calculate_accuracy(model, dataloader, criterion, device, config
     accuracy = 100 * correct / total
     return avg_loss, accuracy
 
-def train_linear_probe(model, dataloader, val_dataloader, epochs, config, optimizer, scheduler, criterion, writer, logger, device):
+def train_linear_probe(model, dataloader, val_dataloader, epochs, config, optimizer, scheduler, criterion, writer, logger, device,  start_epoch=0, best_val_loss=float('inf'), best_val_acc=0.0):
     model.train()
     trainable_layers = []
     for name, param in model.named_parameters():
@@ -77,12 +82,11 @@ def train_linear_probe(model, dataloader, val_dataloader, epochs, config, optimi
     for layer in trainable_layers:
         print(layer)
     print(f"Total trainable layers: {len(trainable_layers)}")
-    best_val_loss = float('inf')
-    best_val_acc = 0.0
+    print(f"Linear layer output features: {model.linear.out_features}")
     loss_history = []
     val_loss_history = []
     val_acc_history = []
-    for epoch in range(epochs):
+    for epoch in range(start_epoch, epochs):
         total_loss = 0.0
         progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{epochs}", leave=False)
         for batch in progress_bar:
@@ -113,16 +117,10 @@ def train_linear_probe(model, dataloader, val_dataloader, epochs, config, optimi
         if avg_val_loss < best_val_loss: # or avg_val_acc > best_val_acc: # Save model only based on validation loss
             best_val_loss = min(avg_val_loss, best_val_loss)
             best_val_acc = max(avg_val_acc, best_val_acc)
-            save_checkpoint(model, optimizer, epoch, best_val_loss, best_val_acc, config, is_best=True)
+            save_checkpoint(model, optimizer, epoch, best_val_loss, best_val_acc, config, loss_history, val_loss_history, val_acc_history, is_best=True)
             logger.info(f"New best model saved at epoch {epoch+1}")
         # scheduler.step()
-    final_checkpoint = {
-        "model": model.state_dict(),
-        "config": config,
-        "epoch": epochs
-    }
-    torch.save(final_checkpoint, f"checkpoints/lp{config['classname']}_exp{config['experiment']}/lp{config['classname']}_exp{config['experiment']}_final.pth")
-
+    save_checkpoint(model, optimizer, epoch, best_val_loss, best_val_acc, config, loss_history, val_loss_history, val_acc_history, is_best=False)
     save_loss_curve(loss_history, val_loss_history, f"lp{config['classname']}_exp{config['experiment']}")
 
     print("Training Complete!")
@@ -130,10 +128,15 @@ def train_linear_probe(model, dataloader, val_dataloader, epochs, config, optimi
 
 
 
-def main(classname):
+def main(classname, checkpoint_path=None, args=None):
     # Load config
     with open("configs/linear-probe-config.yaml", "r") as f:
         config = yaml.safe_load(f)
+     # Update config with command-line arguments
+    for key, value in vars(args).items():
+        if value is not None:
+            print(f"{key} chnaging to {value}")
+            config[key] = value
     
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -146,6 +149,9 @@ def main(classname):
     os.makedirs(f"checkpoints/lp{config['classname']}_exp{config['experiment']}", exist_ok=True)
     os.makedirs(f"results/lp{config['classname']}_exp{config['experiment']}", exist_ok=True)
     writer = SummaryWriter(f"logs/tensorboard/lp{config['classname']}_exp{config['experiment']}")
+    # Log the configuration file as a text summary
+    writer.add_text('config', str(config))
+
     logging.basicConfig(
         filename="logs/run.log",
         level=logging.INFO,
@@ -166,10 +172,13 @@ def main(classname):
     linear_probe_model = VisionLinearProbe(vision_model, config["num_classes"]).to(device)
     
     # Prepare data loaders
+    print("Loading data loaders...")
     train_dataloader = load_dataloader(config, split="train")
+    print("----Train dataloader loaded----")
     val_dataloader = load_dataloader(config, split="val")
+    print("----Val dataloader loaded----")
     test_dataloader = load_dataloader(config, split="test")
-    
+    print("----Test dataloader loaded----")
     # Prepare optimizer and loss function
     optimizer = optim.Adam(linear_probe_model.linear.parameters(), lr=config["learning_rate"])
 
@@ -184,7 +193,18 @@ def main(classname):
         criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
     else:
         criterion = nn.CrossEntropyLoss()
-    
+    start_epoch = 0
+    best_val_loss = float('inf')
+    best_val_acc = 0.0
+
+    if checkpoint_path:
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        linear_probe_model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        start_epoch = checkpoint['epoch']
+        best_val_loss = checkpoint['best_val_loss']
+        best_val_acc = checkpoint['best_val_acc']
+        print(f"Resuming training from epoch {start_epoch}")
     # Train linear probe
     train_linear_probe(
         model=linear_probe_model,
@@ -198,6 +218,9 @@ def main(classname):
         logger=logger,
         writer=writer,
         device=device,
+        start_epoch=start_epoch,
+        best_val_loss=best_val_loss,
+        best_val_acc=best_val_acc,
     )
 
     
@@ -205,6 +228,17 @@ def main(classname):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--class_name", type=str, default="birads", help="Classification for Birads or density")
+    parser.add_argument("--checkpoint_path", type=str, help="Path to the checkpoint to resume training")
+    parser.add_argument("--classname", type=str, default="birads", help="Classification for Birads or density")
+    parser.add_argument("--config_path", type=str, default="configs/linear-probe-config.yaml", help="Path to the config file")
+    parser.add_argument("--experiment", type=str, help="Experiment number")
+    parser.add_argument("--num_classes", type=int, default=None, help="Number of classes")
+    # parser.add_argument("--finetuned_weights_path", type=str, help="Path to the finetuned weights")
+    parser.add_argument("--epochs", type=int,default=None,help="Total epochs")
+    parser.add_argument("--test", action="store_true", help="Flag for testing")
+
+
     args = parser.parse_args()
-    main(args.class_name)
+    if not args.test:
+        args.test = None
+    main(args.classname, args.checkpoint_path, args)

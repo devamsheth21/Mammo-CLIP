@@ -53,13 +53,12 @@ def plot_roc_curve(targets, predictions, experiment):
 
 
 
-
-def evaluate_model(predictions, targets, experiment):
+def evaluate_model(probabilities, predictions, targets, experiment):
     """
     Evaluate the performance of a classification model.
 
     Args:
-    - predictions (list): Model predictions.
+    - probabilities (list): Model probabilities.
     - targets (list): True labels.
     - experiment (str): Name of the experiment.
 
@@ -73,6 +72,7 @@ def evaluate_model(predictions, targets, experiment):
         os.makedirs(results_dir)
 
     # Calculate the classification report
+    predictions = np.argmax(probabilities, axis=1)
     report = classification_report(targets, predictions, output_dict=True)
     report_df = pd.DataFrame(report).transpose()
     report_df.to_csv(f"{results_dir}/classification_report.csv", index=True)
@@ -88,21 +88,50 @@ def evaluate_model(predictions, targets, experiment):
     plt.clf()
 
     # Calculate the AuROC
-    try:
-        auc = roc_auc_score(targets, predictions)
-        print(f"AuROC for {experiment}: {auc}")
-    except ValueError:
-        print(f"Cannot calculate AUROC for {experiment} due to single class prediction.")
+    if len(np.unique(targets)) > 2:
+        # One-vs-Rest AuROC for multi-class classification
+        auroc = roc_auc_score(targets, probabilities, multi_class='ovr')
+        print(f"One-vs-Rest AuROC for {experiment}: {auroc}")
+    else:
+        try:
+            auroc = roc_auc_score(targets, probabilities[:, 1])
+            print(f"AuROC for {experiment}: {auroc}")
+        except ValueError:
+            print(f"Cannot calculate AUROC for {experiment} due to single class prediction.")
 
     # Plot the AuROC curve
-    try:
-        fpr, tpr, _ = roc_curve(targets, predictions)
-        plt.plot(fpr, tpr)
-        plt.plot([0, 1], [0, 1], linestyle='--')
-        plt.title("AuROC Curve")
-        plt.xlabel("False Positive Rate")
-        plt.ylabel("True Positive Rate")
+    if len(np.unique(targets)) > 2:
+        # One-vs-Rest AuROC curve for multi-class classification
+        fpr = dict()
+        tpr = dict()
+        roc_auc = dict()
+        for i in range(len(np.unique(targets))):
+            fpr[i], tpr[i], _ = roc_curve(targets, probabilities[:, i])
+            roc_auc[i] = auc(fpr[i], tpr[i])
+
+        plt.figure()
+        colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
+        for i, color in zip(range(len(np.unique(targets))), colors):
+            plt.plot(fpr[i], tpr[i], color=color, lw=2, label=f'Class {i} vs Rest (area = {roc_auc[i]:0.2f})')
+
+        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('Receiver Operating Characteristic')
+        plt.legend(loc="lower right")
         plt.savefig(f"{results_dir}/auroc.png")
         plt.clf()
-    except ValueError:
-        print(f"Cannot plot AUROC curve for {experiment} due to single class prediction.")
+    else:
+        try:
+            fpr, tpr, _ = roc_curve(targets, probabilities[:, 1])
+            plt.plot(fpr, tpr)
+            plt.plot([0, 1], [0, 1], linestyle='--')
+            plt.title("AuROC Curve")
+            plt.xlabel("False Positive Rate")
+            plt.ylabel("True Positive Rate")
+            plt.savefig(f"{results_dir}/auroc.png")
+            plt.clf()
+        except ValueError:
+            print(f"Cannot plot AUROC curve for {experiment} due to single class prediction.")
